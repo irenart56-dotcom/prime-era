@@ -1,5 +1,5 @@
 /* prime era: офлайн-запуск. Сначала отдаём сохранённое, в фоне обновляем. */
-const C = "pe-v24";
+const C = "pe-v25";
 self.addEventListener("install", e => { self.skipWaiting(); e.waitUntil(caches.open(C).then(c => c.addAll(["./", "index.html", "fb.js", "manifest.json", "icon-192.png"]).catch(() => {}))); });
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));
 self.addEventListener("fetch", e => {

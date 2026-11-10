@@ -496,6 +496,14 @@ body.dragmode{-webkit-user-select:none;user-select:none}
 .hcs .step{align-items:center;box-sizing:border-box;min-width:0}
 .hcs .hsel{width:100%;max-width:100%;min-width:0;box-sizing:border-box}
 .ideas{display:flex;flex-wrap:wrap;gap:6px}
+.pcal{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.pcal-m{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:76px;padding:10px 4px;border-radius:12px;border:1px solid transparent;background:var(--accent-soft);color:var(--ink);font:inherit;text-align:center;cursor:pointer}
+.pcal-m b{font-size:15px}.pcal-n{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2);font-weight:600}.pcal-s{font-size:11px;color:var(--ink-2)}
+.pcal-m.lo{background:var(--surface-2);opacity:.6}.pcal-m.nil b{color:var(--ink-2);font-weight:400}
+.pcal-m.on{border-color:var(--accent);opacity:1}
+.pcal-leg{display:flex;align-items:center;justify-content:center;gap:6px;text-align:center;margin:10px 0 0}.pcal-dot{display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--surface-2);flex:none}
+.pcal-act{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px}
+@media (min-width:560px){.pcal{grid-template-columns:repeat(4,1fr)}}
 </style>
 
 <div id="peSplash" style="position:fixed;inset:0;z-index:60;background:var(--bg,#F2F1F5);display:flex;align-items:center;justify-content:center;font-family:Prata,Georgia,serif;font-size:30px;color:var(--ink,#27222F)">prime era</div>
@@ -2665,6 +2673,58 @@ function evRows(secs,ids){const C=evCache(),y=todayStr().slice(0,4),out=[];
     l.filter(x=>x.d.slice(0,4)===y).forEach(x=>{const q=qtyAt(id,dShift(x.d,bond?-2:-1),ids);if(!(q>0))return;
       out.push({id,n:s.n||"Бумага",d:x.d,per:x.a,q,a:Math.round(x.a*q*100)/100,bond,key:id+"|"+x.d});});});
   return out.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);}
+/* календарь выплат: 12 месяцев вперёд по текущему портфелю + все купоны до погашения; выгрузка для Claude */
+const NDFL=0.13;
+function calEvents(ids){const C=evCache(),t=todayStr(),out=[];
+  posOf(ids,txArr().filter(x=>!x.h)).list.filter(x=>x.q>0).forEach(x=>{const s=(S.sec||{})[x.sec]||{},c=C[x.sec],bond=c?c.mk==="bonds":isBond(s);
+    let l=c?c.l:[];
+    if(!c&&bond&&s.nc&&s.cv){let d=s.nc;for(let i=0;i<240&&d&&(!s.mat||d<=s.mat);i++){l.push({d,a:s.cv});if(!s.cpd)break;d=dShift(d,s.cpd);}}
+    l.filter(e=>e.d>t).forEach(e=>{const est=bond&&!(e.a>0),per=e.a>0?e.a:(bond?+s.cv||0:0);
+      out.push({id:x.sec,n:x.n,d:e.d,per,q:x.q,a:Math.round(per*x.q*100)/100,bond,est,mat:false});});
+    if(bond&&s.mat&&s.mat>t){const fv=+s.fv||1000;out.push({id:x.sec,n:x.n,d:s.mat,per:fv,q:x.q,a:Math.round(fv*x.q*100)/100,bond,est:false,mat:true});}});
+  return out.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:a.n.localeCompare(b.n,"ru"));}
+function calMonths(ev){const t=parse(todayStr()),keys=[];for(let i=0;i<12;i++)keys.push(ymd(new Date(t.getFullYear(),t.getMonth()+i,1)).slice(0,7));
+  const M=keys.map(k=>{const r=ev.filter(e=>!e.mat&&e.d.slice(0,7)===k),g=r.reduce((s,e)=>s+e.a,0);return {k,g,net:g*(1-NDFL),n:r.length,est:r.some(e=>e.est)};});
+  const tot=M.reduce((s,m)=>s+m.g,0),avg=tot/12;M.forEach(m=>m.lo=m.g<avg*0.75);return {keys,M,tot,avg};}
+const monLab=k=>MONTHS_N[+k.slice(5)-1]+" "+k.slice(0,4);
+function calHtml(ids){const ev=calEvents(ids);if(!ev.length&&!S.evBusy)return "";
+  const {M,tot,avg}=calMonths(ev),last=M[11].k,empty=M.filter(m=>!m.g).length,lo=M.filter(m=>m.lo).length;
+  const cell=m=>`<button type="button" class="pcal-m${m.lo?" lo":""}${!m.g?" nil":""}${S.calM===m.k?" on":""}" data-calm="${m.k}" aria-pressed="${S.calM===m.k}"><span class="pcal-n">${MON_S[+m.k.slice(5)-1]}${m.k.slice(5)==="01"||m===M[0]?" "+m.k.slice(2,4):""}</span><b class="num">${m.g?(m.est?"≈":"")+fmtN(m.net,0)+" ₽":"—"}</b><span class="pcal-s num">${m.g?fmtN(m.g,0)+" до нал.":"пусто"}</span></button>`;
+  const lv=S.calL||"3",near=M[2].k;let list=ev.filter(e=>lv==="all"||e.d.slice(0,7)<=(lv==="3"?near:last));if(S.calM)list=list.filter(e=>e.d.slice(0,7)===S.calM);
+  const grp={};list.forEach(e=>(grp[e.d.slice(0,7)]=grp[e.d.slice(0,7)]||[]).push(e));
+  const row=e=>`<div class="row small" style="padding:6px 0;border-top:1px solid var(--line);gap:8px"><span class="grow">${esc(e.n)}<span class="muted" style="display:block">${e.mat?"погашение":e.bond?"купон":"дивиденды · отсечка"} ${fmtD(e.d)} · ${e.est?"≈":""}${rubK(e.per)} × ${fmtN(e.q,0)} шт</span></span><span class="cpr"><b class="num">${e.est?"≈":""}+${rubK(e.mat?e.a:e.a*(1-NDFL))}</b>${e.mat?`<span class="chip">номинал</span>`:`<span class="small muted num">${rubK(e.a)} до налога</span>`}</span></div>`;
+  const body=Object.keys(grp).map(k=>{const g=grp[k].filter(e=>!e.mat).reduce((s,e)=>s+e.a,0);return `<div class="row" style="margin-top:12px;align-items:baseline"><span class="eyebrow grow">${monLab(k)}</span><span class="small num">${g?"+"+rubK(g*(1-NDFL))+" на руки":""}</span></div>${grp[k].map(row).join("")}`;}).join("");
+  const hasEst=ev.some(e=>e.est&&e.d.slice(0,7)<=last);
+  return `<section class="card" style="gap:0" id="calCard"><h2 style="margin-bottom:6px">Календарь выплат</h2>
+    <p class="small muted" style="margin:0 0 12px">${tot?`За 12 месяцев ≈ <b class="num" style="color:var(--ink)">${rubK(tot*(1-NDFL))}</b> на руки (${rubK(tot)} до налога) · в среднем ${rubK(avg*(1-NDFL))} в месяц${empty?` · пустых месяцев: ${empty}`:""}${lo-empty>0?` · слабых: ${lo-empty}`:""}.`:S.evBusy?"Загружаю график выплат с Мосбиржи…":"В ближайшие 12 месяцев выплат нет."} Считаю по бумагам, которые у тебя сейчас.</p>
+    <div class="pcal">${M.map(cell).join("")}</div>
+    <p class="small muted pcal-leg"><i class="pcal-dot"></i>бледные — ниже среднего, сюда подбираем бумаги${hasEst?" · ≈ — купон ещё не объявлен, взят текущий":""}</p>
+    ${S.calM?`<div class="row" style="margin-top:4px"><span class="small grow">Показан ${MONTHS_P[+S.calM.slice(5)-1]} ${S.calM.slice(0,4)}</span><button type="button" class="linkbtn" style="padding:0" data-calm="${S.calM}">Все месяцы</button></div>`:""}
+    ${S.calM?"":`<div class="seg" role="group" aria-label="Период списка" style="margin-top:14px">${[["3","3 месяца"],["12","12 месяцев"],["all","До погашения"]].map(([k,l])=>`<button type="button" data-call="${k}" class="${lv===k?"on":""}">${l}</button>`).join("")}</div>`}
+    ${body||`<p class="small muted" style="margin-top:12px">В этом месяце выплат нет.</p>`}
+    <div class="pcal-act"><button type="button" class="btn small" id="calExp">Выгрузить для Claude</button></div>
+    <p class="small muted" style="margin:8px 0 0;text-align:center">Файл с портфелем, долями и календарём — сохрани в «Файлы» и пришли в чат.</p></section>`;}
+function calExport(){const all=accList().filter(a=>a.type==="invest"&&!a.hide),sel=S.ia?all.filter(a=>a.id===S.ia):all,ids=new Set(sel.map(a=>a.id)),txs=txArr().filter(t=>!t.h);
+  const f=v=>fmtN(v,2),st=sel.map(a=>invStats(a,txs)).reduce((x,y)=>({val:x.val+y.val,inv:x.inv+y.inv}),{val:0,inv:0}),cash=sel.reduce((s,a)=>s+accCash(a,txs),0);
+  const P=posOf(ids,txs),pos=P.list.filter(x=>x.q>0).sort((a,b)=>b.val-a.val),tot=Math.max(1,P.val+Math.max(0,cash)),ev=calEvents(ids),{M,tot:yr,avg}=calMonths(ev),t=todayStr();
+  const kinds={};pos.forEach(x=>kinds[x.kind]=(kinds[x.kind]||0)+x.val);if(cash>0)kinds["Свободные деньги"]=cash;
+  const L=[];L.push(`# Портфель prime era — выгрузка ${fmtD(t)}`,"",`Счёт: ${sel.map(a=>a.n).join(", ")}`,"","## Сводка","",
+    `- Стоимость: ${f(st.val)} ₽`,`- Вложено: ${f(st.inv)} ₽`,`- Результат: ${f(st.val-st.inv)} ₽`,`- Свободные деньги на счёте: ${f(cash)} ₽`,
+    `- Доли: ${Object.entries(kinds).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${fmtN(v/tot*100,1)}%`).join(" · ")}`,
+    `- Выплаты за 12 месяцев вперёд: ${f(yr)} ₽ до налога, ${f(yr*(1-NDFL))} ₽ на руки, в среднем ${f(avg*(1-NDFL))} ₽/мес на руки`,"",
+    "## Позиции","","| Бумага | Код | Тип | Шт | Средняя, ₽ | Цена, ₽ | Цена, % | Стоимость, ₽ | Доля | Результат, ₽ | Купон, % год. | След. купон | Купон, ₽/шт | Погашение |","|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+  pos.forEach(x=>{const s=(S.sec||{})[x.sec]||{};L.push(`| ${x.n} | ${x.tk||s.sid||""} | ${x.kind} | ${fmtN(x.q,4)} | ${f(x.avg)} | ${f(x.price)} | ${s.pct?fmtN(s.pct,3):""} | ${f(x.val)} | ${fmtN(x.val/tot*100,1)}% | ${f(x.pl)} | ${s.cp?fmtN(s.cp,2):""} | ${s.nc?fmtD(s.nc):""} | ${s.cv?f(s.cv):""} | ${s.mat?fmtD(s.mat):""} |`);});
+  L.push("","## Календарь выплат: 12 месяцев","","Считается по текущему количеству бумаг. НДФЛ 13%. «≈» — купон ещё не объявлен, взят текущий.","","| Месяц | До налога, ₽ | На руки, ₽ | Ниже среднего | Что платит |","|---|---|---|---|---|");
+  M.forEach(m=>{const who=[...new Set(ev.filter(e=>!e.mat&&e.d.slice(0,7)===m.k).map(e=>e.n))].join(", ");L.push(`| ${monLab(m.k)} | ${m.est?"≈":""}${f(m.g)} | ${f(m.net)} | ${m.g?(m.lo?"да":""):"пусто"} | ${who||"—"} |`);});
+  L.push("","## Все будущие выплаты до погашения","","| Дата | Бумага | Вид | За шт, ₽ | Шт | Сумма до налога, ₽ |","|---|---|---|---|---|---|");
+  ev.forEach(e=>L.push(`| ${fmtD(e.d)} | ${e.n} | ${e.mat?"погашение":e.bond?"купон":"дивиденды"} | ${e.est?"≈":""}${f(e.per)} | ${fmtN(e.q,0)} | ${e.est?"≈":""}${f(e.a)} |`));
+  const tr=txs.filter(x=>(x.k==="b"||x.k==="s")&&ids.has(x.acc)).sort(txOrd);
+  if(tr.length){L.push("","## Сделки","","| Дата | Сделка | Бумага | Шт | Цена, ₽ | НКД, ₽ | Комиссия, ₽ |","|---|---|---|---|---|---|---|");
+    tr.forEach(x=>L.push(`| ${fmtD(x.d)} | ${x.k==="b"?"покупка":"продажа"} | ${((S.sec||{})[x.sec]||{}).n||""} | ${fmtN(x.q,4)} | ${f(x.p)} | ${x.nkd?f(x.nkd):""} | ${x.fee?f(x.fee):""} |`));}
+  const name="prime-era-portfolio-"+t+".md",file=new File([L.join("\n")+"\n"],name,{type:"text/markdown"});
+  const dl=()=>{const u=URL.createObjectURL(file),a=document.createElement("a");a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000);setSave("Файл готов","ok");};
+  try{if(navigator.canShare&&navigator.canShare({files:[file]})){navigator.share({files:[file],title:name}).catch(e=>{if(e&&e.name!=="AbortError")dl();});return;}}catch(e){}
+  dl();}
 function marketCard(){const M=S.mkt||{},chg=(v,pr)=>{const c=(v-pr)/pr*100;return `<span class="small" style="color:${c>=0?"var(--ok)":"var(--warn)"}">${c>=0?"+":"−"}${fmtN(Math.abs(c),2)}%</span>`;};
   const im=M.imoex&&M.imoex.v?`<div class="stat"><span class="eyebrow">Мосбиржа</span><span class="v num mv">${fmtN(M.imoex.v,2)}</span>${M.imoex.ch!=null?`<span class="small" style="color:${M.imoex.ch>=0?"var(--ok)":"var(--warn)"}">${M.imoex.ch>=0?"+":"−"}${fmtN(Math.abs(M.imoex.ch),2)}% за день</span>`:""}</div>`:"";
   const fx=(M.fx||[]).map(x=>`<div class="stat"><span class="eyebrow">${x.k} · ЦБ</span><span class="v num mv">${fmtN(x.v,2)}</span>${chg(x.v,x.pr)}</div>`).join("");
@@ -2881,7 +2941,8 @@ function invHtml(){
      ${cpsPast.length?`<span class="eyebrow" style="display:block;margin-top:6px">Прошли</span>${cpsPast.map(cpRow).join("")}`:""}
      ${cpsFut.length?`<span class="eyebrow" style="display:block;margin-top:10px">Впереди</span>${cpsFut.map(cpRow).join("")}`:""}</section>`:""}
    <section class="card"><h2>Пополнения</h2><p class="small muted">Цель — 5 000 ₽ в месяц. В этом месяце ${rub(Math.max(0,cur))}${cur>=5000?" ✓":""}; за 12 мес. цель выполнена ${hit} ${hit===1?"раз":hit>=2&&hit<=4?"раза":"раз"}.</p>${barChart("invm",keys,mv.map(v=>Math.max(0,v)),"var(--s1)","Пополнения")}</section>
-   ${hist.length?`<section class="card" style="gap:0"><h2 style="margin-bottom:6px">История</h2>${hist.map(hl).join("")}</section>`:""}`;}
+   ${hist.length?`<section class="card" style="gap:0"><h2 style="margin-bottom:6px">История</h2>${hist.map(hl).join("")}</section>`:""}
+   ${calHtml(ids)}`;}
 function bindInv(){
   const f=$("invNew");if(f)f.onsubmit=e=>{e.preventDefault();const n=$("in-n").value.trim();if(!n){setSave("Назови счёт","warn");return;}const c=JSON.parse(JSON.stringify(accCfg()));c.list=c.list||[];c.list.push({id:"a"+Date.now().toString(36),n,type:"invest",b0:0,d0:todayStr(),ex:true});saveAcc(c);};
   view().querySelectorAll("[data-ia]").forEach(b=>b.onclick=()=>{S.ia=b.dataset.ia||null;render();});
@@ -2896,6 +2957,8 @@ function bindInv(){
     S.sec=Object.assign({},S.sec,{[id]:s});writeDoc("sec/"+id,s);S.pre=null;rebuildMoney();render();if(!(v>0))refreshPrices();});
   view().querySelectorAll("[data-secc]").forEach(b=>b.onclick=()=>openSec(b.dataset.secc));
   const pr=$("pxR");if(pr)pr.onclick=refreshPrices;const mr=$("mktR");if(mr)mr.onclick=()=>{S.mkt=Object.assign({},S.mkt,{imoexErr:null,fxErr:null});refreshMarket();render();};
+  view().querySelectorAll("[data-calm]").forEach(b=>b.onclick=()=>{S.calM=S.calM===b.dataset.calm?null:b.dataset.calm;render();const k=$("calCard");if(k)k.scrollIntoView({block:"start",behavior:"smooth"});});
+  view().querySelectorAll("[data-call]").forEach(b=>b.onclick=()=>{S.calL=b.dataset.call;render();});const ce=$("calExp");if(ce)ce.onclick=calExport;
   view().querySelectorAll("[data-tx]").forEach(b=>b.onclick=()=>openTx(b.dataset.tx));}
 function txMoney(){
   const txs=txArr(),st=txStart(),out={};let last="";const aD=accList().map(a=>a.d0||"").filter(Boolean).sort()[0]||"9999";const skip=d=>d.slice(0,7)<st&&d<aD;
